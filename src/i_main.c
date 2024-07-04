@@ -64,9 +64,9 @@ int main(int argc, char **argv)
     vreg_set_voltage(VREG_VOLTAGE_1_30);
     // todo pause? is this the cause of the cold start isue?
     set_sys_clock_khz(270000, true);
+    gpio_debug_pins_init();
 #if !USE_PICO_NET
     // debug ?
-//    gpio_debug_pins_init();
 #endif
 #ifdef PICO_SMPS_MODE_PIN
     gpio_init(PICO_SMPS_MODE_PIN);

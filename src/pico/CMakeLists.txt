@@ -5,11 +5,21 @@ target_sources(common_pico INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/i_system.c
         ${CMAKE_CURRENT_LIST_DIR}/piconet.c
         ${CMAKE_CURRENT_LIST_DIR}/i_timer.c
-        ${CMAKE_CURRENT_LIST_DIR}/i_video.c
         ${CMAKE_CURRENT_LIST_DIR}/stubs.c
 
         ${CMAKE_CURRENT_LIST_DIR}/i_picosound.c
 )
+
+if (PICO_EL_DISPLAY)
+    target_sources(common_pico INTERFACE
+            ${CMAKE_CURRENT_LIST_DIR}/i_video_el.c
+            )
+else()
+    target_sources(common_pico INTERFACE
+            ${CMAKE_CURRENT_LIST_DIR}/i_video.c
+            )
+endif()
+
 if (PICO_ON_DEVICE)
     target_sources(common_pico INTERFACE
             ${CMAKE_CURRENT_LIST_DIR}/blit.S
@@ -36,8 +46,16 @@ target_compile_definitions(common_pico INTERFACE
         PICO_AUDIO_I2S_DMA_IRQ=1
         )
 
-pico_generate_pio_header(common_pico ${CMAKE_CURRENT_LIST_DIR}/video_doom.pio)
-target_link_libraries(common_pico INTERFACE pico_stdlib pico_multicore pico_scanvideo_dpi)
+
+
+if (PICO_EL_DISPLAY)
+    target_link_libraries(common_pico INTERFACE pico_stdlib pico_multicore)
+    pico_generate_pio_header(common_pico ${CMAKE_CURRENT_LIST_DIR}/el.pio)
+else()
+    pico_generate_pio_header(common_pico ${CMAKE_CURRENT_LIST_DIR}/video_doom.pio)
+    target_link_libraries(common_pico INTERFACE pico_stdlib pico_multicore pico_scanvideo_dpi)
+endif()
+
 
 add_library(pico_cd INTERFACE)
 if (TARGET tinyusb_host)

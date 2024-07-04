@@ -1,0 +1,81 @@
+
+
+; Transmits a single image frame to the connected EL display
+;
+; The input TX-FIFO data should be in the followwing format:
+;  16 bits - screen width in pixels minus one: 319
+;  16 bits - screen height in pixels: 256
+;  10280 bits - 1-bit pixel data including one trailing blank line
+; 
+; The following pins should be assigned:
+;  set-pins: VS, HS, VCLK
+;  out-pins: VID
+
+.program display_frame
+
+.wrap_target
+    out isr, 16            ; load width to ISR
+    out y, 16              ; load height to Y
+
+    set pins, 0b101 [5]    ; pull VS one time and set VCLK high
+    set pins, 0b100
+
+next_line:                 
+    set pins, 0b100        ; pull HS low
+
+    set pins, 0b000        ; pull VCLK twice, while HS is low
+    set pins, 0b100
+
+    set pins, 0b000
+    set pins, 0b100
+
+    set pins, 0b110        ; pull HS high
+
+    mov x, isr             ; (re)load X with the width value from ISR 
+
+display_line:
+    out pins, 1            ; output pixel value to VID
+    set pins, 0b010        ; pull VCLK
+    set pins, 0b110
+    jmp x--, display_line  ; onto the next pixel
+
+    jmp y--, next_line     ; onto the next line
+
+    set pins, 0b000        ; end frame by pulling VS, HS, VCLK low
+
+.wrap
+
+% c-sdk {
+
+
+#define EL_PIO_SM 0
+
+static inline void el_program_init(PIO pio)
+{
+    pio_gpio_init(pio, EL_VS_PIN);
+    pio_gpio_init(pio, EL_HS_PIN);
+    pio_gpio_init(pio, EL_VCLK_PIN);
+    pio_gpio_init(pio, EL_VID_PIN);
+
+    pio_sm_set_consecutive_pindirs(pio, EL_PIO_SM, EL_VS_PIN, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, EL_PIO_SM, EL_HS_PIN, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, EL_PIO_SM, EL_VCLK_PIN, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, EL_PIO_SM, EL_VID_PIN, 1, true);
+
+    pio_sm_config cfg;
+    
+    uint offs = pio_add_program(pio, &display_frame_program);
+    cfg = display_frame_program_get_default_config(offs);
+    
+    sm_config_set_out_shift(&cfg, true, true, 32);
+    // sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_TX);
+    sm_config_set_out_pins(&cfg, EL_VID_PIN, 1);    
+    sm_config_set_set_pins(&cfg, EL_VS_PIN, 3);    
+    sm_config_set_clkdiv(&cfg, 10.0);
+    pio_sm_init(pio, EL_PIO_SM, offs, &cfg);
+
+    pio_sm_set_enabled(pio, EL_PIO_SM, true);
+}
+
+
+%}

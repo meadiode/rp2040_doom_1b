@@ -452,7 +452,7 @@ target_compile_definitions(small_doom_common INTERFACE
         PICO_NO_TIMING_DEMO=1
         NO_USE_EXIT=1 # not sure whether we have an exit... if so what does it need to do?
 
-        PICO_DEBUG_PIN_BASE=18
+        PICO_DEBUG_PIN_BASE=14
         PICO_DEBUG_PIN_COUNT=2
 )
 
@@ -502,7 +502,7 @@ function(add_doom_tiny SUFFIX RENDER_LIB)
         # SDK minimilization
         PICO_TIME_DEFAULT_ALARM_POOL_DISABLED=1
         PICO_TIME_DEFAULT_ALARM_POOL_MAX_TIMERS=1
-        PICO_DISABLE_SHARED_IRQ_HANDLERS=1
+        PICO_DISABLE_SHARED_IRQ_HANDLERS=0
         PICO_USE_OPTIMISTIC_SBRK=1
 
         # MUSIC
@@ -513,8 +513,8 @@ function(add_doom_tiny SUFFIX RENDER_LIB)
         USE_PICO_NET=1
         # for vgaboard
         PICO_DEFAULT_I2C=1
-        PICO_DEFAULT_I2C_SDA_PIN=18
-        PICO_DEFAULT_I2C_SCL_PIN=19
+        PICO_DEFAULT_I2C_SDA_PIN=6
+        PICO_DEFAULT_I2C_SCL_PIN=7
 
         #NO_USE_LOAD=1
         #NO_USE_SAVE=1
@@ -636,7 +636,7 @@ if (PICO_SDK)
             NO_USE_FINALE_BUNNY=1
     )
     target_compile_definitions(doom_tiny PRIVATE
-            TINY_WAD_ADDR=0x10040000
+            TINY_WAD_ADDR=0x10048000
     )
     target_link_libraries(doom_tiny PRIVATE tiny_settings)
     add_doom_tiny(_nost render_newhope)
