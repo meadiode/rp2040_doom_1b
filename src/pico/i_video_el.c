@@ -51,7 +51,7 @@
 
 #define LOW_PRIO_IRQ 31
 
-volatile uint32_t sw_number = 94;
+volatile uint32_t sw_number = 103;
 
 static int32_t dma_chan = -1; 
 
@@ -81,9 +81,7 @@ uint8_t *next_video_scroll;
 uint8_t *video_scroll;
 
 uint8_t __aligned(4) frame_buffer[2][SCREENWIDTH * MAIN_VIEWHEIGHT];
-
 static uint8_t __aligned(4) frame_buffer_1b[EL_DISP_STRIDE * EL_DISP_HEIGHT] = {0};
-
 static uint8_t palette[256];
 static uint8_t shared_pal[NUM_SHARED_PALETTES][16];
 static int8_t next_pal=-1;
@@ -92,25 +90,24 @@ uint8_t display_frame_index;
 uint8_t display_overlay_index;
 uint8_t display_video_type;
 
-typedef void (*scanline_func)(uint32_t *dest, int scanline);
+typedef void (*scanline_func)(int scanline);
 
-static void scanline_func_none(uint32_t *dest, int scanline);
-static void scanline_func_double(uint32_t *dest, int scanline);
-static void scanline_func_single(uint32_t *dest, int scanline);
-static void scanline_func_wipe(uint32_t *dest, int scanline);
+static void scanline_func_none(int scanline);
+static void scanline_func_single(int scanline);
+static void scanline_func_wipe(int scanline);
 
 scanline_func scanline_funcs[] = {
         scanline_func_none,     // VIDEO_TYPE_NONE
         NULL,                   // VIDEO_TYPE_TEXT
         scanline_func_single,   // VIDEO_TYPE_SAVING
-        scanline_func_single,   // VIDEO_TYPE_DOUBLE
+        scanline_func_single,   // VIDEO_TYPE_DOUBLE (not used here, single instead)
         scanline_func_single,   // VIDEO_TYPE_SINGLE
         scanline_func_wipe,     // VIDEO_TYPE_WIPE
 };
 
 
-CU_REGISTER_DEBUG_PINS(dbg1, dbg2);
-CU_SELECT_DEBUG_PINS(dbg1);
+// CU_REGISTER_DEBUG_PINS(dbg1, dbg2);
+// CU_SELECT_DEBUG_PINS(dbg1);
 // CU_SELECT_DEBUG_PINS(dbg2)
 
 #define DM_X(px, dm_id) ((px) & (dither_maps[dm_id].size - 1))
@@ -121,22 +118,26 @@ CU_SELECT_DEBUG_PINS(dbg1);
 
 #define SET_1B_PIXEL(x, y) (frame_buffer_1b[BUF1B_BYTE_ID(x, y)] |= 1 << (x & 7))
 #define UNSET_1B_PIXEL(x, y) (frame_buffer_1b[BUF1B_BYTE_ID(x, y)] &= ~(1 << (x & 7)))
-#define PUT_1B_PIXEL(x, y, src_val, dm_id) (src_val >= DM_VAL((x), (y), dm_id) ? (SET_1B_PIXEL((x), (y))) : (UNSET_1B_PIXEL((x), (y))))
+#define PUT_1B_PIXEL(x, y, src_val, dm_id) (src_val >= DM_VAL((x), (y), dm_id) ?\
+                                             (SET_1B_PIXEL((x), (y))) :\
+                                             (UNSET_1B_PIXEL((x), (y))))
 
-#define PUT_1B_PIXEL_ST(x, y, src_val, dm_id) (((src_val >= 80 ? MIN(255, (int16_t)src_val + 32) : MAX(0, (int16_t)src_val - 32)) >= DM_VAL((x), (y), dm_id)) ? (SET_1B_PIXEL((x), (y))) : (UNSET_1B_PIXEL((x), (y))))
+#define PUT_1B_PIXEL_ST(x, y, src_val, dm_id) (((src_val >= 80 ? \
+                                MIN(255, (int16_t)src_val + 32) :\
+                                MAX(0, (int16_t)src_val - 32)) >= DM_VAL((x), (y), dm_id)) ?\
+                                                                  (SET_1B_PIXEL((x), (y))) :\
+                                                                  (UNSET_1B_PIXEL((x), (y))))
 
-static void scanline_func_none(uint32_t *dest, int scanline)
+
+static void scanline_func_none(int scanline)
 {
-    // memset(dest, 0, SCREENWIDTH * 2);
+    memset(&frame_buffer_1b[scanline * EL_DISP_STRIDE], 0, EL_DISP_STRIDE);
 }
 
 
-static void scanline_func_single(uint32_t *dest, int scanline)
+static void scanline_func_single(int scanline)
 {
     uint8_t *src;
-
-    static const uint8_t *dmap = dither_maps[8].map;
-    static const uint8_t dsize = dither_maps[8].size;
 
     if (scanline < MAIN_VIEWHEIGHT)
     {
@@ -165,39 +166,14 @@ static void scanline_func_single(uint32_t *dest, int scanline)
         for (int i = 0; i < 8; i++)
         {
             uint8_t sp = *(src + pid + i);
-            sp = palette[sp];
-            // bt |= (sp >= dmap[(scanline & (dsize - 1)) * dsize + ((pid + i) & (dsize - 1))] ? 1 : 0) << i;
-            
+            sp = palette[sp];            
             PUT_1B_PIXEL(pid + i, scanline + 28, sp, display_frame_index ? 4 : 8);
         }
-
-        // *(dst + (pid >> 3)) = bt;
     }
 }
 
 
-static inline void palette_convert_scanline(uint32_t *dest, const uint8_t *src)
-{
-    // for (int i = 0; i < SCREENWIDTH; i += 2)
-    // {
-    //     uint32_t val = palette[*src++];
-    //     val |= (palette[*src++]) << 16;
-    //     *dest++ = val;
-    // }
-}
-
-
-static void scanline_func_double(uint32_t *dest, int scanline)
-{
-    if (scanline < MAIN_VIEWHEIGHT)
-    {
-        const uint8_t *src = frame_buffer[display_frame_index] + scanline * SCREENWIDTH;
-        palette_convert_scanline(dest, src);
-    }
-}
-
-
-static void scanline_func_wipe(uint32_t *dest, int scanline)
+static void scanline_func_wipe(int scanline)
 {
     static const uint8_t *dmap = dither_maps[8].map;
     static const uint8_t dsize = dither_maps[8].size;
@@ -241,28 +217,12 @@ static void scanline_func_wipe(uint32_t *dest, int scanline)
             }
         }
     }
-
-
-    // const uint8_t *src;
-
-    // src = frame_buffer[0];
-
-    // src += scanline * SCREENWIDTH;
-
-    // for (int x = 0; x < SCREENWIDTH; x++)
-    // {
-    //     // uint8_t sp = palette[src[x]];
-    //     uint8_t sp = x % 255;
-    //     PUT_1B_PIXEL(x, scanline + 28, sp, 8);
-    // }
-
 }
 
 
-static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp, uint off, int scanline)
+static inline uint draw_vpatch(patch_t *patch, vpatchlist_t *vp, uint off, int scanline)
 {
     int repeat = vp->entry.repeat;
-    dest += vp->entry.x;
     int w = vpatch_width(patch);
     const uint8_t *data0 = vpatch_data(patch);
     const uint8_t *data = data0 + off;
@@ -295,14 +255,11 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                     px++;
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v >> 4]], dmi);
                     px++;
-                    // *p++ = palette[pal[v & 0xf]];
-                    // *p++ = palette[pal[v >> 4]];
                 }
                 if (len & 1)
                 {
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[(*data++) & 0xf]], dmi);
                     px++;
-                    // *p++ = palette[pal[(*data++) & 0xf]];
                 }
                 assert(px <= pend);
                 if (px == pend)
@@ -322,12 +279,10 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                 uint v = *data++;
                 if (v & 0xf)
                 {
-                    // p[0] = palette[pal[v & 0xf]];
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0xf]], dmi);
                 }
                 if (v >> 4)
                 {
-                    // p[1] = palette[pal[v >> 4]];
                     PUT_1B_PIXEL_ST(px + 1, py + 28, palette[pal[v >> 4]], dmi);
                 } 
                 px += 2;
@@ -337,7 +292,6 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                 uint v = *data++;
                 if (v & 0xf)
                 {
-                    // p[0] = palette[pal[v & 0xf]];
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0xf]], dmi);
                 }
             }
@@ -351,8 +305,6 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
             for (int i = 0; i < w / 2; i++)
             {
                 uint v = *data++;
-                // p[0] = palette[pal[v & 0xf]];
-                // p[1] = palette[pal[v >> 4]];
                 PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0xf]], dmi);
                 PUT_1B_PIXEL_ST(px + 1, py + 28, palette[pal[v >> 4]], dmi);
                 px += 2;
@@ -360,7 +312,6 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
             if (w & 1)
             {
                 uint v = *data++;
-                // p[0] = palette[pal[v & 0xf]];
                 PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0xf]], dmi);
             }
             break;
@@ -390,10 +341,6 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                     px++;
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[(v >> 18) & 0x3f]], dmi);
                     px++;
-                    // *p++ = palette[pal[v & 0x3f]];
-                    // *p++ = palette[pal[(v >> 6) & 0x3f]];
-                    // *p++ = palette[pal[(v >> 12) & 0x3f]];
-                    // *p++ = palette[pal[(v >> 18) & 0x3f]];
                 }
                 len &= 3;
                 if (len--)
@@ -401,19 +348,16 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                     uint v = *data++;
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0x3f]], dmi);
                     px++;
-                    // *p++ = palette[pal[v & 0x3f]];
                     if (len--)
                     {
                         v >>= 6;
                         v |= (*data++) << 2;
                         PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0x3f]], dmi);
                         px++;
-                        // *p++ = palette[pal[v & 0x3f]];
                         if (len--)
                         {
                             v >>= 6;
                             v |= (*data++) << 4;
-                            // *p++ = palette[pal[v & 0x3f]];
                             PUT_1B_PIXEL_ST(px, py + 28, palette[pal[v & 0x3f]], dmi);
                             px++;
                             assert(!len);
@@ -443,7 +387,6 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                 {
                     PUT_1B_PIXEL_ST(px, py + 28, palette[pal[*data++]], dmi);
                     px++;
-                    // *p++ = palette[pal[*data++]];
                 }
                 assert(px <= pend);
                 
@@ -458,17 +401,15 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
         {
             uint16_t px = vp->entry.x;
             uint16_t py = scanline;
-            // dest[0] = palette[*data++];
             PUT_1B_PIXEL_ST(px, py + 28, palette[*data++], dmi);
             uint16_t col = palette[*data++];
+
             for (int i = 1; i < w - 1; i++)
             {
                 PUT_1B_PIXEL_ST(px + i, py + 28, col, dmi);
-                // dest[i] = col;
             }
             PUT_1B_PIXEL_ST(px + w - 1, py + 28, col, dmi);
 
-            // dest[w-1] = palette[*data++];
             break;
         }
         default:
@@ -488,32 +429,16 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
             uint16_t px = vp->entry.x;
             uint16_t py = scanline;
 
-            // if (((uintptr_t)dest) & 3)
-            // if (px & 3)
-            // {
             for (int i = 0; i < w / 2; i++)
             {
                 uint v = *data++;
                 PUT_1B_PIXEL_ST(px, py + 28, pal16[v & 0xf], dmi);
                 PUT_1B_PIXEL_ST(px + 1, py + 28, pal16[v >> 4], dmi);
-                // p[0] = pal16[v & 0xf];
-                // p[1] = pal16[v >> 4];
                 px += 2;
             }
-            // }
-            // else
-            // {
-            //     uint32_t *wide = (uint32_t *) dest;
-            //     for (int i = 0; i < w / 2; i++)
-            //     {
-            //         uint v = *data++;
-            //         wide[i] = pal16[v & 0xf] | (pal16[v >> 4] << 16);
-            //     }
-            // }
             if (w & 1)
             {
                 uint v = *data++;
-                // dest[w-1] = pal16[v & 0xf];
                 PUT_1B_PIXEL_ST(px + w - 1, py + 28, pal16[v & 0xf], dmi);
             }
             break;
@@ -528,13 +453,11 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                 uint v = *data++;
                 if (v & 0xf)
                 {
-                    // p[0] = pal16[v & 0xf];
                     PUT_1B_PIXEL_ST(px, py + 28, pal16[v & 0xf], dmi);
                 }
 
                 if (v >> 4)
                 {
-                    // p[1] = pal16[v >> 4];
                     PUT_1B_PIXEL_ST(px + 1, py + 28, pal16[v >> 4], dmi);
                 }
                 px += 2;
@@ -545,7 +468,6 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
                 uint v = *data++;
                 if (v & 0xf)
                 {
-                    // p[0] = pal16[v & 0xf];
                     PUT_1B_PIXEL_ST(px, py + 28, pal16[v & 0xf], dmi);
                 }
             }
@@ -567,8 +489,9 @@ static inline uint draw_vpatch(uint16_t *dest, patch_t *patch, vpatchlist_t *vp,
             w--; // hackity hack
         }
         
-        for(int i=0;i<repeat*w;i++)
+        for (int i=0;i<repeat*w;i++)
         {
+            /* TODO ? */
             // dest[w+i] = dest[i];
 
             // PUT_1B_PIXEL(px, py + 28, pal16[v & 0xf], 1);
@@ -619,23 +542,20 @@ void new_frame_init_overlays_palette_and_wipe(void)
                         g = gammatable[usegamma-1][g];
                         b = gammatable[usegamma-1][b];
                     }
-                    // palette[i] = (MAX(MAX(r, g), b) + MIN(MIN(r, g), b)) >> 1;
-                    int16_t pp = (r + g + b) * 341 >> 10;
-                    if (pp >= 80)
-                    {
-                        pp = MIN(pp + 8, 255);
-                    }
-                    else
-                    {
-                        pp = MAX(pp - 8, 0);
-                    }
+                    
+                /* Desaturating and adding some contrast */
+                /* TODO: it needs adjustments */
+                    uint16_t pp = (r + g + b) * 341 >> 10;
+                    pp <<= 1;
+                    palette[i] = MIN(255, pp);
 
-                    // palette[i] = (r + g + b) * 341 >> 10;
-                    palette[i] = (uint8_t)pp;
-
-                    if ((r >= 100) && ((g + b) <= 40))
+                    if (display_video_type != VIDEO_TYPE_WIPE)
                     {
-                        palette[i] = 255;
+                        /* HACK: max out reds to make the UI visible */
+                        if ((r >= 140) && ((g + b) <= 60))
+                        {
+                            palette[i] = 255;
+                        }
                     }
 
                 }
@@ -670,24 +590,11 @@ void new_frame_init_overlays_palette_and_wipe(void)
                     r += ((r0 - r) * mul) >> 16;
                     g += ((g0 - g) * mul) >> 16;
                     b += ((b0 - b) * mul) >> 16;
-                    // palette[i] = (MAX(MAX(r, g), b) + MIN(MIN(r, g), b)) >> 1;
-                    int16_t pp = (r + g + b) * 341 >> 10;
-                    if (pp >= 64)
-                    {
-                        pp = MIN(pp + 32, 255);
-                    }
-                    else
-                    {
-                        pp = MAX(pp - 32, 0);
-                    }
+                
+                /* Desaturating */
+                    uint16_t pp = (r + g + b) * 341 >> 10;
 
-                    // palette[i] = (r + g + b) * 341 >> 10;
                     palette[i] = (uint8_t)pp;
-
-                    if ((r >= 100) && ((g + b) <= 40))
-                    {
-                        palette[i] = 255;
-                    }
                 }
             }
 
@@ -755,19 +662,11 @@ void new_frame_init_overlays_palette_and_wipe(void)
 
 void new_frame_stuff(void)
 {
-    static bool first_frame = true;
-
     if (sem_available(&render_frame_ready)) {
         sem_acquire_blocking(&render_frame_ready);
         display_video_type = next_video_type;
         display_frame_index = next_frame_index;
         display_overlay_index = next_overlay_index;
-
-        // if (first_frame)
-        // {
-        //     first_frame = false;
-        //     display_frame_index = 0;
-        // }
 
 #if !DEMO1_ONLY
         video_scroll = next_video_scroll; // todo does this waste too much space
@@ -792,38 +691,14 @@ void new_frame_stuff(void)
 
 void draw_1b_buffer(void)
 {
-    // struct scanvideo_scanline_buffer *buffer = scanvideo_begin_scanline_generation_linked(display_video_type == VIDEO_TYPE_TEXT ? 2 : 1, false);
-
-    static uint32_t buffer[SCREENWIDTH * 4];
-    // static int frame = 0;
-
-    gpio_xor_mask(1 << 14);
-
-    // if (frame == 0)
-    // {
-    //     next_frame_index ^= 1;
-    //     new_frame_stuff();
-    //     frame = 1;
-    // }
 
     new_frame_stuff();
 
     for (int scanline = 0; scanline < SCREENHEIGHT; scanline++)
     {
-        // static int8_t last_frame_number = -1;
-
-        // if ((int8_t)frame != last_frame_number)
-        // {
-        //     last_frame_number = frame;
-        //     new_frame_stuff();
-        // }
-
         if (display_video_type != VIDEO_TYPE_TEXT)
-        {
-            // we don't have text mode -> normal transition yet, but we may for network game, so leaving this here - we would need to put the buffer pointers back
-            // assert (buffer->data < text_scanline_buffer_start || buffer->data >= text_scanline_buffer_start + TEXT_SCANLINE_BUFFER_TOTAL_WORDS);
-            
-            scanline_funcs[display_video_type](buffer, scanline);
+        {            
+            scanline_funcs[display_video_type](scanline);
             
             if (display_video_type >= FIRST_VIDEO_TYPE_WITH_OVERLAYS)
             {
@@ -857,7 +732,7 @@ void draw_1b_buffer(void)
                     
                     if (yoff < vpatch_height(patch))
                     {
-                        vpatchlists->vpatch_doff[vp] = draw_vpatch((uint16_t*)(buffer), patch, &overlays[vp],
+                        vpatchlists->vpatch_doff[vp] = draw_vpatch(patch, &overlays[vp],
                                                                    vpatchlists->vpatch_doff[vp], scanline);
                         prev = vp;
                     }
@@ -867,48 +742,31 @@ void draw_1b_buffer(void)
                     }
                 }
             }
-
-            // uint16_t *p = (uint16_t *)buffer->data;
-            // p[0] = video_doom_offset_raw_run;
-            // p[1] = p[2];
-            // p[2] = SCREENWIDTH - 3;
-            // buffer->data[SCREENWIDTH / 2 + 1] = video_doom_offset_raw_1p;
-            // buffer->data[SCREENWIDTH / 2 + 2] = video_doom_offset_end_of_scanline_skip_ALIGN;
-            // buffer->data_used = SCREENWIDTH / 2 + 3;
-
-        }
-        else
-        {
-            // render_text_mode_scanline(buffer, scanline);
         }
 
-        // scanvideo_end_scanline_generation(buffer);
-
-        // buffer = scanvideo_begin_scanline_generation_linked(display_video_type == VIDEO_TYPE_TEXT ? 2 : 1, false);
     }
 
 
     pio_sm_put_blocking(pio0, EL_PIO_SM, EL_DISP_WH_HDR);
 
-    // for (size_t j = 0; j < sizeof(frame_buffer_1b) / sizeof(uint32_t); j++)
-    // {
-    //     uint32_t data = *(((uint32_t*)&frame_buffer_1b) + j);
-    //     pio_sm_put_blocking(pio0, EL_PIO_SM, data);
-        
-    //     while (!pio_sm_is_tx_fifo_empty(pio0, EL_PIO_SM))
-    //     {
-    //         asm("nop;");
-    //     }
-    // }
 
+#if 0
+    /* no dma */
+    for (size_t j = 0; j < sizeof(frame_buffer_1b) / sizeof(uint32_t); j++)
+    {
+        uint32_t data = *(((uint32_t*)&frame_buffer_1b) + j);
+        pio_sm_put_blocking(pio0, EL_PIO_SM, data);
+        
+        while (!pio_sm_is_tx_fifo_empty(pio0, EL_PIO_SM))
+        {
+            asm("nop;");
+        }
+    }
+#else
 
     dma_channel_set_read_addr(dma_chan, frame_buffer_1b, true);
 
-    // sleep_ms(20ul);
-
-    // irq_set_pending(LOW_PRIO_IRQ);
-    // sem_release(&display_frame_freed);
-    // DEBUG_PINS_XOR(dbg1, 1);
+#endif
 }
 
 
@@ -964,21 +822,11 @@ static void core1()
     irq_set_enabled(LOW_PRIO_IRQ, true);
 
     sem_release(&core1_launch);
-    // sem_release(&display_frame_freed);
     irq_set_pending(LOW_PRIO_IRQ);
-
-    // DEBUG_PINS_SET(dbg1, 1);
-    // DEBUG_PINS_SET(dbg2, 1);
-    
-    // draw_1b_buffer();
 
     while (true)
     {
         pd_core1_loop();
-
-        // draw_1b_buffer();
-     
-        // tight_loop_contents();
     }
 }
 

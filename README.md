@@ -1,3 +1,38 @@
+# RP2040 Doom: EL-Display flavor
+
+This fork is an adaptation of Graham Sanderson's awesome RP2040 Doom port to work with an ElectroLuminescent(EL) monochrome display using 1-bit rendering.
+![EL_Doom02](el_doom02.jpg)
+
+
+Currently it only works with the display that goes by the following part number: **LAEL320.256-6C**, it has a resolution of 320 by 256, monochrome - amber color.
+Big thanks to Wenting Zhang([@zephray](https://github.com/zephray)) who deduced the pinout and made [a blog post about it](https://www.zephray.me/post/lael_320_256_driving/), as there is no other information about this model, no specs, no datasheet etc.
+
+
+## 1-bit rendering
+As the display can only display pixels of one tone of one color, the rendered game frames should be post-processed in such a way as to create an illusion of different shades of the base color.
+For this, the ordered dithering method was used.
+![EL_Doom01](el_doom01.jpg)
+
+That is, each original RGB pixel is desaturated, a value from the threshold map is applied to it, and then the resulting value is quantized to either one or zero to uotput it to the display. Two differnet types of threshold maps are used: Bayer's pattern and blue noise.
+
+## The result
+The game is pretty much playable on this display, although the UI is quite difficult to read. But this could be remedied by altering the original assets and/or color palettes.
+
+![EL_Doom.gif](el_doom.gif)
+
+
+## Building
+
+Building steps are just like for the original RP2040 Doom, only the PICO_EL_DISPLAY variable should be set to TRUE, i.e.:
+```bash
+mkdir rp2040-build
+cd rp2040-build
+cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DPICO_BOARD=vgaboard -DPICO_EL_DISPLAY=TRUE -DPICO_SDK_PATH=/path/to/pico-sdk -DPICO_EXTRAS_PATH=/path/to/pico-extras ..
+```
+
+
+The original README below:
+--------------------------
 # RP2040 Doom
 
 This is a port of Doom for RP2040 devices, derived from [Chocolate Doom](https://github.com/chocolate-doom/chocolate-doom).
